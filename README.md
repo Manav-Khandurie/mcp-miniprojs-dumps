@@ -1,0 +1,2 @@
+# mcp-miniprojs-dumps
+A SAMPLE REPO TO TRY OUT POC IDEAS REGARDING MCPS
