@@ -45,19 +45,24 @@ def run_with_docker(code_str: str, output_basename: str, fmt: str):
     # Prepare temp workspace
     tmpdir = Path(tempfile.mkdtemp(prefix="mcp_diagrams_"))
     script_path = tmpdir / "diagram_code.py"
-    # Write the code
     script_path.write_text(code_str, encoding="utf-8")
 
-    # Many diagrams examples use `filename="diagram"` inside the script.
-    # We'll make sure the script writes to the given filename by setting current working dir.
-    # Mount tmpdir as /workspace so container writes diagram.png to that folder.
     container_workdir = "/workspace"
     host_path = str(tmpdir.resolve())
 
-    # Construct docker run command. We mount the temp dir and run python inside the container.
-    # Note: we use --rm so container cleans up after run.
+    # Build docker run command
+    # Exclude .env by mounting only the temp directory (no project root)
     image = "mcp/aws-diagram:latest"
-    cmd = f"docker run --rm -v {shlex.quote(host_path)}:{container_workdir} -w {container_workdir} {image} python {container_workdir}/diagram_code.py"
+
+    # Add -e to unset any sensitive envs and ensure no .env interference
+    cmd = (
+        f"docker run --rm "
+        f"-v {shlex.quote(host_path)}:{container_workdir} "
+        f"-w {container_workdir} "
+        f"-e PDM_IGNORE_ENV_FILE=1 "
+        f"-e PYTHONUNBUFFERED=1 "
+        f"{image} python {container_workdir}/diagram_code.py"
+    )
 
     try:
         completed = subprocess.run(
@@ -67,22 +72,23 @@ def run_with_docker(code_str: str, output_basename: str, fmt: str):
             timeout=120
         )
     except Exception as e:
-        return {"ok": False, "error": str(e), "stdout": "", "stderr": "" , "outpath": None}
+        return {"ok": False, "error": str(e), "stdout": "", "stderr": "", "outpath": None}
 
     stdout = completed.stdout
     stderr = completed.stderr
     ok = completed.returncode == 0
 
-    # container should have produced output file "<output_basename>.<fmt>" in tmpdir
     out_file = tmpdir / f"{output_basename}.{fmt}"
     if out_file.exists():
         return {"ok": ok, "stdout": stdout, "stderr": stderr, "outpath": str(out_file), "tmpdir": str(tmpdir)}
-    else:
-        # if user code created 'diagram.png' explicitly, try that too
-        candidate = tmpdir / f"diagram.{fmt}"
-        if candidate.exists():
-            return {"ok": ok, "stdout": stdout, "stderr": stderr, "outpath": str(candidate), "tmpdir": str(tmpdir)}
-        return {"ok": ok, "stdout": stdout, "stderr": stderr, "outpath": None, "tmpdir": str(tmpdir)}
+
+    # Fallback if user hard-coded diagram filename
+    candidate = tmpdir / f"diagram.{fmt}"
+    if candidate.exists():
+        return {"ok": ok, "stdout": stdout, "stderr": stderr, "outpath": str(candidate), "tmpdir": str(tmpdir)}
+
+    return {"ok": ok, "stdout": stdout, "stderr": stderr, "outpath": None, "tmpdir": str(tmpdir)}
+
 
 if run_button:
     st.spinner("Generating...")
